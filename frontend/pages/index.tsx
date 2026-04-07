@@ -39,7 +39,7 @@ export default function Home() {
 
   const testConnection = async () => {
     try {
-      const res = await axios.get(getBackendUrl('/api/health'), { timeout: 5000 });
+      const res = await axios.get(getBackendUrl('/api/health'), { timeout: 300000 });
       setError('');
       setQuotaRemaining(res.data.quota_remaining || 20);
       setSuccess(`✅ Backend reachable! Model: ${res.data.model} | Quota: ${res.data.quota_remaining}/20`);

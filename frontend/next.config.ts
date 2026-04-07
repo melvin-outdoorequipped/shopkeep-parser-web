@@ -2,10 +2,8 @@
 const nextConfig = {
   rewrites: async () => [
     {
-      source: '/api/parse',
-      destination: 'http://localhost:8080/api/parse',
+      source: '/api/:path*',
+      destination: 'http://localhost:8080/api/:path*',
     },
   ],
 };
-
-module.exports = nextConfig;

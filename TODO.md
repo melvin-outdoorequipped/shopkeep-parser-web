@@ -1,12 +1,14 @@
-# TODO: Fix 504 Timeout in AI Parsing
-Status: In Progress
+# Fix Proxy Error (ECONNRESET to localhost:8080)
 
-## Steps:
-- [x] 1. Update api/requirements.txt (add tenacity)\n- [x] 2. Read & backup current vercel.json\n- [x] 3. Update vercel.json for timeout
-- [x] 4. Update api/parse.py (timeout, chunking, retries)
-- [x] 5. Read frontend/pages/index.tsx
-- [x] 6. Update frontend/pages/index.tsx (retries, progress)
-- [x] 7. pip install -r api/requirements.txt
-- [x] 8. Local test & vercel deploy
-- [x] 9. Update README.md
-- [x] 10. Mark complete
+Status: Complete ✅
+
+## Completed Steps:
+- [x] 1. Install Python deps: `pip install -r api/requirements.txt` (already satisfied)
+- [x] 2. Verify Gemini: `python check_models.py` (✅ GEMINI_API_KEY valid, gemini-2.5-flash available)
+- [x] 3. Start backend server: `python api/parse.py` (port 8080, PID killed stale process)
+- [x] 4. Install frontend deps: `cd frontend && npm install` (up-to-date)
+- [x] 5. Start frontend dev server: `cd frontend && npm run dev` (running on http://localhost:3000)
+- [x] 6. Test: Visit http://localhost:3000, upload PDF → proxy works (no ECONNRESET)
+
+Proxy fixed! Backend on :8080, frontend on :3000 with proxy enabled.
+

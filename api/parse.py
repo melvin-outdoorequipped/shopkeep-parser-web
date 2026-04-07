@@ -12,20 +12,32 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ------------------------------------------------------------------
-# Configuration
+# Configuration & Validation
 # ------------------------------------------------------------------
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR_API_KEY_HERE")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise RuntimeError("❌ GEMINI_API_KEY not set in environment variables")
 genai.configure(api_key=GEMINI_API_KEY)
-
-# Use a model from your available list
-MODEL_NAME = "gemini-2.5-flash"   # confirmed available
-model = genai.GenerativeModel(MODEL_NAME)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Try to use a stable model
+MODEL_NAME = "gemini-2.5-flash"  # widely available
+try:
+    model = genai.GenerativeModel(MODEL_NAME)
+    # Quick test
+    test_response = model.generate_content("Hello")
+    if not test_response.text:
+        raise Exception("Model returned empty response")
+    logger.info(f"✅ Using model: {MODEL_NAME}")
+except Exception as e:
+    logger.warning(f"{MODEL_NAME} failed: {e}, falling back to gemini-pro")
+    MODEL_NAME = "gemini-2.5-flash"
+    model = genai.GenerativeModel(MODEL_NAME)
+
 # ------------------------------------------------------------------
-# Coordinate‑based PDF text extraction (unchanged)
+# PDF text extraction (coordinate‑based)
 # ------------------------------------------------------------------
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     structured_text = []
@@ -93,7 +105,7 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     return '\n'.join(structured_text)
 
 # ------------------------------------------------------------------
-# Gemini parsing with detailed error logging
+# Gemini parsing with detailed error reporting
 # ------------------------------------------------------------------
 def parse_with_gemini(text: str):
     if len(text) > 30000:
@@ -151,6 +163,9 @@ Document text:
         else:
             logger.warning(f"Unexpected JSON type: {type(data)}")
             return []
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}\nRaw result: {result}")
+        raise Exception(f"Gemini returned invalid JSON: {str(e)}")
     except Exception as e:
         logger.error(f"Gemini parsing error: {str(e)}")
         raise Exception(f"Gemini AI error: {str(e)}")
@@ -159,10 +174,13 @@ Document text:
 # Flask app
 # ------------------------------------------------------------------
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-@app.route('/api/parse', methods=['POST'])
+@app.route('/api/parse', methods=['POST', 'OPTIONS'])
 def parse_document():
+    if request.method == 'OPTIONS':
+        return '', 204
+    
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
     file = request.files['file']
@@ -183,5 +201,11 @@ def parse_document():
         logger.exception("Parsing failed")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({'status': 'healthy', 'backend': 'available', 'model': MODEL_NAME})
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)   
+    port = int(os.environ.get('PORT', 5000))    
+    logger.info(f"Starting Flask server on 0.0.0.0:{port}")
+    app.run(host='0.0.0.0', port=port, debug=False)

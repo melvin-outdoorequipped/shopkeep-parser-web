@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
 
@@ -12,10 +12,15 @@ interface InvoiceItem {
   [key: string]: string;
 }
 
-const getBackendUrl = (endpoint: string = '/api/parse') => {
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL;
+// Reads the backend URL from environment variable (set in .env.local)
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || '';
+
+const getBackendUrl = (endpoint: string) => {
+  // Remove any trailing slash from BACKEND_URL to avoid double slashes
+  const base = BACKEND_URL.replace(/\/$/, '');
   if (!base) {
-    throw new Error('Missing NEXT_PUBLIC_BACKEND_URL in .env.local');
+    // Fallback for local development (if env var missing)
+    return endpoint;
   }
   return `${base}${endpoint}`;
 };
@@ -30,15 +35,17 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'data' | 'raw'>('data');
   const [totalValue, setTotalValue] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [quotaRemaining, setQuotaRemaining] = useState<number>(20);
 
   const testConnection = async () => {
     try {
       const res = await axios.get(getBackendUrl('/api/health'), { timeout: 5000 });
       setError('');
-      setSuccess(`✅ Backend reachable! Model: ${res.data.model}`);
+      setQuotaRemaining(res.data.quota_remaining || 20);
+      setSuccess(`✅ Backend reachable! Model: ${res.data.model} | Quota: ${res.data.quota_remaining}/20`);
     } catch (err: any) {
       if (err.code === 'ERR_NETWORK') {
-        setError('❌ Cannot reach backend – check if backend is running on port 8080');
+        setError('❌ Cannot reach backend – check if backend is running on port 8080 and that NEXT_PUBLIC_BACKEND_URL is set correctly.');
       } else if (err.response) {
         setError(`❌ Server error: ${err.response.status} - ${err.response.data?.error || ''}`);
       } else {
@@ -59,6 +66,12 @@ export default function Home() {
   const handleUpload = async () => {
     if (!file) return;
 
+    // Check quota before uploading
+    if (quotaRemaining <= 1) {
+      setError('❌ API quota exceeded (20 requests/day free tier). Please try again tomorrow or upgrade your plan.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess('');
@@ -78,7 +91,9 @@ export default function Home() {
       setActiveTab('data');
       setSuccess(`✅ Parsed ${parsedItems.length} items successfully!`);
       
-      // Calculate total value (if wholesale_price exists)
+      // Update quota display
+      setQuotaRemaining(Math.max(0, quotaRemaining - 1));
+      
       let total = 0;
       parsedItems.forEach((item: any) => {
         const price = parseFloat(item.wholesale_price);
@@ -87,8 +102,21 @@ export default function Home() {
       });
       setTotalValue(total);
     } catch (err: any) {
+      const status = err.response?.status;
       const backendMsg = err.response?.data?.error;
-      setError(`Parse failed: ${backendMsg || err.message || 'Unknown error'}`);
+      
+      if (status === 429) {
+        setError(`❌ Rate Limited: ${backendMsg || 'API quota exceeded (20 requests/day). Please try again in a few moments or tomorrow.'}`);
+        setQuotaRemaining(0);
+      } else if (status === 500) {
+        setError(`❌ Server Error: ${backendMsg || 'Internal server error. Please check the backend logs.'}`);
+      } else if (err.code === 'ECONNABORTED') {
+        setError('❌ Request Timeout: File too large or server too slow. Try a smaller file.');
+      } else if (err.code === 'ERR_NETWORK') {
+        setError('❌ Network Error: Cannot reach backend. Check your connection and NEXT_PUBLIC_BACKEND_URL.');
+      } else {
+        setError(`❌ ${backendMsg || err.message || 'Unknown error'}`);
+      }
       setSuccess('');
     } finally {
       setLoading(false);
@@ -123,10 +151,16 @@ export default function Home() {
           <span className="text-2xl font-bold text-textPrimary">PARSER</span>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={testConnection}
+            className="text-xs px-2 py-1 rounded bg-border hover:bg-cardHover transition"
+          >
+            🔄 Test Connection
+          </button>
           <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
             error ? 'bg-danger/20 text-danger' : success ? 'bg-success/20 text-success' : 'bg-accent/20 text-accent'
           }`}>
-            {error ? '⚠️ Error' : success ? '✓ Ready' : '● Online'}
+            {quotaRemaining > 0 ? `● Quota: ${quotaRemaining}/20` : '⚠️ No Quota'}
           </div>
         </div>
       </header>
@@ -155,14 +189,14 @@ export default function Home() {
             />
             <button
               onClick={handleUpload}
-              disabled={!file || loading}
+              disabled={!file || loading || quotaRemaining <= 1}
               className={`w-full py-3 rounded-xl font-semibold transition ${
-                !file || loading
+                !file || loading || quotaRemaining <= 1
                   ? 'bg-secondary/50 cursor-not-allowed'
                   : 'bg-secondary hover:bg-purple-700'
               } text-white`}
             >
-              {loading ? '⏳ Processing...' : '🚀 Process Document'}
+              {loading ? '⏳ Processing...' : quotaRemaining <= 1 ? '❌ No Quota' : '🚀 Process Document'}
             </button>
           </div>
 
@@ -189,8 +223,9 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-auto pt-4 text-center text-xs text-textSecondary">
-            v3.0 • Coordinate-Based
+
+          <div className="text-center text-xs text-textSecondary">
+            v1.1 • Website
           </div>
         </aside>
 
@@ -226,12 +261,20 @@ export default function Home() {
 
           {/* Error / Success Messages */}
           {error && (
-            <div className="bg-danger/20 border border-danger/50 text-danger p-3 rounded-xl mb-4">
-              {error}
+            <div className="bg-danger/20 border border-danger/50 text-danger p-4 rounded-xl mb-4">
+              <p className="text-sm">{error}</p>
+              {error.includes('quota') && (
+                <p className="text-xs mt-2 opacity-75">
+                  Gemini free tier has 20 requests/day limit. You can:
+                  <br />• Wait until tomorrow for quota reset
+                  <br />• Use your desktop app (separate quota)
+                  <br />• Upgrade to Gemini Pro API (paid)
+                </p>
+              )}
             </div>
           )}
           {success && (
-            <div className="bg-success/20 border border-success/50 text-success p-3 rounded-xl mb-4">
+            <div className="bg-success/20 border border-success/50 text-success p-4 rounded-xl mb-4">
               {success}
             </div>
           )}
@@ -258,7 +301,7 @@ export default function Home() {
                       : 'text-textSecondary hover:bg-cardHover'
                   }`}
                 >
-                  📄 Raw Extracted Text
+                  📄 Raw Text
                 </button>
               </div>
 
@@ -289,7 +332,7 @@ export default function Home() {
                     </table>
                   </div>
                 ) : (
-                  <pre className="bg-darkBg p-4 rounded-lg overflow-auto text-xs text-textSecondary font-mono whitespace-pre-wrap">
+                  <pre className="bg-darkBg p-4 rounded-lg overflow-auto text-xs text-textSecondary font-mono whitespace-pre-wrap max-h-96">
                     {rawText}
                   </pre>
                 )}
